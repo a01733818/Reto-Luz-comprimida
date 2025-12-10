@@ -1,0 +1,14 @@
+switchtolayout;
+
+##Cambia parametros de la malla FDE que dependan del gap, ancho y altura    
+long_x_FDE=Anc_Si3N4(ii)+2*sale_FDE;                                                       #Longitud en x de la malla FDE
+long_y_FDE=Alt_Si3N4(kk)+2*sale_FDE;                                                       #Longitud en y de la malla FDE
+
+select("FDE");                                                              #Selecciona FDE
+set("x",(0)*1e-6);                                       #Centra en z la guia de onda
+set("x span",long_x_FDE*1e-6);                                              #Asigna la longitud en y  
+set("mesh cells x",long_x_FDE*resol_x_FDE);                                 #Asigna el numero de celdas en z
+set("y",0);                                                                 #Centra en y la malla FDE 
+set("y span",long_y_FDE*1e-6);                                              #Asigna la longitud en y 
+set("mesh cells y",long_y_FDE*resol_y_FDE);                                 #Asigna el numero de celdas en y 
+

@@ -1,0 +1,24 @@
+switchtolayout;
+
+select("NUCLEO_Si3N4");                                 #Se selecciona el nucleo de Si3N4
+set("x",0*1e-6);                                        #Se centra horizontalmente el Si3N4
+set("x span",Anc_Si3N4(ii)*1e-6);                           #Se configura el ancho del Si3N4
+set("y",0*1e-6);                                        #Se centra verticalmente el Si3N4
+set("y span",Alt_Si3N4(kk)*1e-6);                           #Se configura la altura del Si3N4
+
+
+select("SiO2");                                         #Se selecciona el nucleo de SiO2
+set("x",0*1e-6);                                        #Se centra horizontalmente el SiO2
+set("x span",Anc_SiO2*1e-6);                            #Se configura el ancho del SiO2              
+set("y",-(Alt_Si3N4(kk)/2.0 + Alt_SiO2/2 )*1e-6);           #Se centra verticalmente el SiO2
+set("y span",Alt_SiO2*1e-6);                            #Se configura la altura del SiO2
+
+
+select("Silicio");                                      #Se selecciona el nucleo de Si
+set("x",0*1e-6);                                        #Se centra horizontalmente el Si
+set("x span",Anc_Si*1e-6);                              #Se configura el ancho del Si
+set("y",-(Alt_Si3N4(kk)/2.0 + Alt_SiO2 + Alt_Si/2 )*1e-6);  #Se centra verticalmente el Si
+set("y span",Alt_Si*1e-6);                              #Se configura la altura del Si
+
+
+

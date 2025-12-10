@@ -1,0 +1,242 @@
+# ============================================
+# PRINCIPAL_D3.lsf
+# Barrido VarFDE con captura dual TE/TM, birefringencia y overlaps
+# ============================================
+
+clear;
+switchtolayout;
+
+# -------------------- Utilidades --------------------
+
+# Overlap escalar con campos eléctricos (0..1)
+function overlap_scalar_E(m1, m2) {
+  Ex1 = getdata(m1,"Ex"); Ey1 = getdata(m1,"Ey"); Ez1 = getdata(m1,"Ez");
+  Ex2 = getdata(m2,"Ex"); Ey2 = getdata(m2,"Ey"); Ez2 = getdata(m2,"Ez");
+  x = getdata(m1,"x"); y = getdata(m1,"y");
+  sx=size(x); Nx=sx(1); sy=size(y); Ny=sy(1);
+  if (Nx>1) { dx = (x(Nx)-x(1))/(Nx-1); } else { dx = 0; }
+  if (Ny>1) { dy = (y(Ny)-y(1))/(Ny-1); } else { dy = 0; }
+  dA = dx*dy;
+
+  Num = sum(sum( Ex1*conj(Ex2) + Ey1*conj(Ey2) + Ez1*conj(Ez2) ))*dA;
+
+  I1 = sum(sum( abs(Ex1)^2 + abs(Ey1)^2 + abs(Ez1)^2 ))*dA;
+  I2 = sum(sum( abs(Ex2)^2 + abs(Ey2)^2 + abs(Ez2)^2 ))*dA;
+
+  if (I1<=1e-300 or I2<=1e-300) { return 0; }
+  O = abs(Num)^2/(I1*I2);
+  return O;
+}
+
+# Overlap basado en potencia (Poynting); requiere H
+# Devuelve -1 si no hay H-campos disponibles
+function overlap_power(m1, m2) {
+  if ( (havedata(m1,"Hx")==0) or (havedata(m2,"Hx")==0) ) { return -1; }
+  Ex1=getdata(m1,"Ex"); Ey1=getdata(m1,"Ey"); Hx1=getdata(m1,"Hx"); Hy1=getdata(m1,"Hy");
+  Ex2=getdata(m2,"Ex"); Ey2=getdata(m2,"Ey"); Hx2=getdata(m2,"Hx"); Hy2=getdata(m2,"Hy");
+  x = getdata(m1,"x"); y = getdata(m1,"y");
+  sx=size(x); Nx=sx(1); sy=size(y); Ny=sy(1);
+  if (Nx>1) { dx = (x(Nx)-x(1))/(Nx-1); } else { dx = 0; }
+  if (Ny>1) { dy = (y(Ny)-y(1))/(Ny-1); } else { dy = 0; }
+  dA = dx*dy;
+
+  Sz11 = real( Ex1*conj(Hy1) - Ey1*conj(Hx1) );
+  Sz22 = real( Ex2*conj(Hy2) - Ey2*conj(Hx2) );
+  Sz12 = Ex1*conj(Hy2) - Ey1*conj(Hx2);
+
+  P1 = sum(sum(Sz11))*dA;
+  P2 = sum(sum(Sz22))*dA;
+  X  = sum(sum(Sz12))*dA;
+
+  if (P1<=1e-300 or P2<=1e-300) { return 0; }
+  O = abs(X)^2/(P1*P2);
+  return O;
+}
+
+# -------------------- Parámetros de simulación --------------------
+
+# Material de cubierta (ejemplo; si lo usas en Geometria/Mallas, ya está)
+Alt_SiO2=1;  Anc_SiO2=7;
+Alt_Si=Alt_SiO2;  Anc_Si=Anc_SiO2;
+
+# Resolución FDE (ajusta en corrida fina)
+resol_x_FDE = 50;
+resol_y_FDE = 50;
+sale_FDE    = 1;
+
+# Rango de barrido
+Alt_ini=0.4; Alt_fin=0.5; num_puntos_Alt=3;
+Anc_ini=0.6; Anc_fin=0.70; num_puntos_Anc=3;
+lamb_ini=0.5; lamb_fin=1.57; num_puntos_lamb=100;   # um
+
+Alt_Si3N4 = linspace(Alt_ini,Alt_fin,num_puntos_Alt);
+Anc_Si3N4 = linspace(Anc_ini,Anc_fin,num_puntos_Anc);
+lamb_um   = linspace(lamb_ini,lamb_fin,num_puntos_lamb);
+lamb_m    = lamb_um*1e-6;
+
+# Búsqueda de modos
+near_n=0; n_near=1.52; min_n=1.4; max_n=2.2;
+if (near_n==1) {
+  setanalysis("search","near n");
+  setanalysis("n",n_near);
+  setanalysis("use max index",0);
+} else {
+  setanalysis("search","in range");
+  setanalysis("n1",max_n);   # superior
+  setanalysis("n2",min_n);   # inferior
+}
+trial_modes = 60;                          # sube en corrida fina
+setanalysis("number of trial modes", trial_modes);
+
+# Criterios de pureza
+te_puro_min = 0.95;   # TE casi-puro (>=)
+tm_puro_max = 0.05;   # TM casi-puro (<=)
+
+# -------------------- Tabla de salida --------------------
+#  1 Alt_um |  2 Anc_um |  3 lambda_um |
+# TE: 4 neff | 5 beta(1/m) | 6 Aeff(um^2) | 7 TE_frac | 8 mode_idx |
+# TM: 9 neff |10 beta(1/m) |11 Aeff(um^2) |12 TE_frac |13 mode_idx |
+# 14 biref(|neff_TE - neff_TM| o -1)
+# 15 trial_modes | 16 resol_x | 17 resol_y
+# 18 overlap_scalar_TE_TM (0..1 o -1 si falta uno)
+# 19 overlap_power_TE_TM  (0..1, -1 si no hay H o falta uno)
+# 20 gamma_rel_TE (1/Aeff_TE en um^-2, -1 si no hay TE)
+# 21 gamma_rel_TM (1/Aeff_TM en um^-2, -1 si no hay TM)
+
+Nrows = num_puntos_Alt*num_puntos_Anc*num_puntos_lamb;
+DATA  = zeros(Nrows, 21);
+row   = 1;
+
+# -------------------- Barrido --------------------
+for (kk=1:num_puntos_Alt) {
+  Alt_core = Alt_Si3N4(kk);   # um
+  for (ii=1:num_puntos_Anc) {
+    Anc_core = Anc_Si3N4(ii); # um
+
+    Geometria;
+    Mallas;
+
+    for (nn=1:num_puntos_lamb) {
+      wl_m = lamb_m(nn);
+      setanalysis("wavelength", wl_m);
+
+      nmodes = findmodes;
+
+      # --- Best TE y TM por Aeff ---
+      best_idx_TE = -1; best_aeff_TE = 1e99; best_tef_TE = -1;
+      best_idx_TM = -1; best_aeff_TM = 1e99; best_tef_TM = -1;
+
+      for (mm=1:nmodes) {
+        mname = "mode"+num2str(mm);
+
+        # Fracción TE (si existe)
+        tef = -1;
+        if (havedata(mname,"TE polarization fraction")) {
+          tef = real(getdata(mname,"TE polarization fraction"));  # 0..1
+        }
+
+        # --- Área efectiva (nativa o por definición) ---
+        aeff = 0;
+        if (havedata(mname,"Aeff")) {
+          aeff = real(getdata(mname,"Aeff"));   # m^2
+        } else {
+          Ex = getdata(mname,"Ex"); Ey = getdata(mname,"Ey"); Ez = getdata(mname,"Ez");
+          x  = getdata(mname,"x");  y  = getdata(mname,"y");
+
+          sx = size(x); Nx = sx(1);
+          sy = size(y); Ny = sy(1);
+
+          if (Nx > 1) { dx = (x(Nx)-x(1))/(Nx-1); } else { dx = 0; }
+          if (Ny > 1) { dy = (y(Ny)-y(1))/(Ny-1); } else { dy = 0; }
+
+          dA = dx*dy;
+          E2 = abs(Ex)^2 + abs(Ey)^2 + abs(Ez)^2;
+          I1 = sum(sum(E2))*dA;
+          I2 = sum(sum(E2^2))*dA;
+
+          if (I2 > 1e-300) { aeff = (I1^2)/I2; } else { aeff = (I1^2)/1e-300; }
+        }
+
+        # --- Candidatos ---
+        if (tef >= te_puro_min) {
+          if (aeff < best_aeff_TE) { best_aeff_TE = aeff; best_idx_TE = mm; best_tef_TE = tef; }
+        }
+        if ( (tef >= 0) and (tef <= tm_puro_max) ) {
+          if (aeff < best_aeff_TM) { best_aeff_TM = aeff; best_idx_TM = mm; best_tef_TM = tef; }
+        }
+      } # mm
+
+      # --- Datos TE ---
+      neff_TE = -1; beta_TE = -1; aeff_um2_TE = -1; tef_TE = -1; idx_TE = -1; gamma_rel_TE = -1;
+      msel_TE = "";
+      if (best_idx_TE > 0) {
+        msel_TE   = "mode"+num2str(best_idx_TE);
+        neff_TE   = real(getdata(msel_TE,"neff"));
+        beta_TE   = 2*pi/wl_m * neff_TE;          # 1/m
+        aeff_um2_TE = best_aeff_TE*1e12;          # m^2 -> um^2
+        tef_TE    = best_tef_TE;
+        idx_TE    = best_idx_TE;
+        if (aeff_um2_TE>1e-300) { gamma_rel_TE = 1/aeff_um2_TE; } else { gamma_rel_TE = -1; }
+      }
+
+      # --- Datos TM ---
+      neff_TM = -1; beta_TM = -1; aeff_um2_TM = -1; tef_TM = -1; idx_TM = -1; gamma_rel_TM = -1;
+      msel_TM = "";
+      if (best_idx_TM > 0) {
+        msel_TM   = "mode"+num2str(best_idx_TM);
+        neff_TM   = real(getdata(msel_TM,"neff"));
+        beta_TM   = 2*pi/wl_m * neff_TM;          # 1/m
+        aeff_um2_TM = best_aeff_TM*1e12;          # m^2 -> um^2
+        tef_TM    = best_tef_TM;
+        idx_TM    = best_idx_TM;
+        if (aeff_um2_TM>1e-300) { gamma_rel_TM = 1/aeff_um2_TM; } else { gamma_rel_TM = -1; }
+      }
+
+      # --- Birefringencia modal (si ambos existen) ---
+      biref = -1;
+      if ( (neff_TE > 0) and (neff_TM > 0) ) { biref = abs(neff_TE - neff_TM); }
+
+      # --- Overlaps TE vs TM ---
+      Oscalar = -1;
+      Opower  = -1;
+      if ( (best_idx_TE > 0) and (best_idx_TM > 0) ) {
+        Oscalar = overlap_scalar_E(msel_TE, msel_TM);
+        Opower  = overlap_power(msel_TE, msel_TM);   # -1 si no hay H
+      }
+
+      # --- Rellena la fila ---
+      DATA(row,1)  = Alt_core;          # Alt_um
+      DATA(row,2)  = Anc_core;          # Anc_um
+      DATA(row,3)  = lamb_um(nn);       # lambda_um
+
+      DATA(row,4)  = neff_TE;
+      DATA(row,5)  = beta_TE;
+      DATA(row,6)  = aeff_um2_TE;
+      DATA(row,7)  = tef_TE;
+      DATA(row,8)  = idx_TE;
+
+      DATA(row,9)  = neff_TM;
+      DATA(row,10) = beta_TM;
+      DATA(row,11) = aeff_um2_TM;
+      DATA(row,12) = tef_TM;
+      DATA(row,13) = idx_TM;
+
+      DATA(row,14) = biref;
+      DATA(row,15) = trial_modes;
+      DATA(row,16) = resol_x_FDE;
+      DATA(row,17) = resol_y_FDE;
+      DATA(row,18) = Oscalar;
+      DATA(row,19) = Opower;
+      DATA(row,20) = gamma_rel_TE;      # ~ 1/Aeff_TE (um^-2)
+      DATA(row,21) = gamma_rel_TM;      # ~ 1/Aeff_TM (um^-2)
+
+      row = row + 1;
+    } # nn
+  } # ii
+} # kk
+
+# -------------------- Escribe el archivo --------------------
+out_tsv = "datos_modos.tsv";
+write(out_tsv, num2str(DATA));
+
+?("Listo. Guardé "+out_tsv+" con "+num2str(Nrows)+" filas y 21 columnas (TE/TM + biref + overlaps + gamma_rel).");
